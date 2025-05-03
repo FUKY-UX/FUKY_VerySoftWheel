@@ -10,6 +10,7 @@ from fuky_data_Processing import FUKY_DataHandler
 from fuky_device_BleData import FUKY_BleDeviceBase
 import threading
 import cv2
+import mmap
 
 import sys
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QSystemTrayIcon, QMenu, 
@@ -24,13 +25,17 @@ class FUKYWindow(QMainWindow):
         super().__init__()
         self.initUI()
         self.initTray()
+        self.initShareMem()
         # 图像处理线程，我暂时还没有利用更多的进程来处理，所以图像处理和UI更新都是在一个进程中更新
         # 这样效率相对低一些，但是算是历史遗留问题
         self.ImgDataHandler = FUKY_DataHandler()
         self.ImgDataHandler_Thread = threading.Thread(target=self.ImgDataHandler.FUKY_Data_Main)
 
         # 蓝牙处理的进程，利用多核CPU，提高效率，避免高频的IMU数据与低频的图像数据相互影响
+        # 启动BLE设备处理进程
         self.BleFukyDataHandler = FUKY_BleDeviceBase()
+        self.BleFukyDataHandler.start_ble_process()
+
 
         # ---------- 初始化 ----------
 
@@ -133,6 +138,29 @@ class FUKYWindow(QMainWindow):
         # 绑定双击事件
         self.tray_icon.activated.connect(self.trayDoubleClick)
 
+    def initShareMem(self):
+        self.Mouse_Mem_name="FUKY_Mouse_Memory"
+        self.MouseSize = 32
+        self.Locator_Mem_name="FUKY_Locator_Memory"
+        self.LocatorSize = 12
+        # 创建Mouse共享内存
+        self.Mouse_Mem = mmap.mmap(
+            -1,  # 使用匿名映射
+            self.MouseSize,
+            self.Mouse_Mem_name,
+            access=mmap.ACCESS_WRITE
+        )
+        self.ClearMemory(self.Mouse_Mem,self.MouseSize)
+        # 创建Locator共享内存
+        self.Locator_Mem = mmap.mmap(
+            -1,  # 使用匿名映射
+            self.LocatorSize,
+            self.Locator_Mem_name,
+            access=mmap.ACCESS_WRITE
+        )
+        self.ClearMemory(self.Locator_Mem,self.LocatorSize)
+
+
         # ---------- 更新视频显示 ----------
 
     def update_images(self):
@@ -191,9 +219,21 @@ class FUKYWindow(QMainWindow):
         reply = QMessageBox.question(self, '确认退出', '确定要退出吗？',QMessageBox.Yes | QMessageBox.No)
         if reply == QMessageBox.Yes:
             self.ImgDataHandler.Close_fuky_data_processing()
+            if self.Mouse_Mem:
+                self.Mouse_Mem.close()
+            if self.Locator_Mem:
+                self.Locator_Mem.close()#清理共享内存
             self.tray_icon.hide()
             self.close()
             QApplication.quit()
+      
+        # ---------- 共享内存管理 ----------
+    
+    def ClearMemory(self, Target, size):
+        # 清空内存区域
+        Target.seek(0)
+        Target.write(b'\x00' * size)
+        
         
 if __name__ == "__main__":
     app = QApplication(sys.argv)

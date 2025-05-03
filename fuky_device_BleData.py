@@ -7,6 +7,7 @@ import asyncio
 import sys
 import multiprocessing
 import time
+import mmap
 import ctypes  # 用于定义共享内存中的布尔类型
 import struct  # 用于解析二进制数据
 from winrt.windows.storage.streams import DataReader
@@ -25,7 +26,6 @@ class FUKY_BleDeviceBase:
     
     def __init__(self):
         """初始化蓝牙设备扫描器"""
-        self.share_mem = None  # 将在子进程中初始化
         self.DEVICE_NAME = "FUKY_MOUSE"
         self.SERVICE_UUID = "0000f233-0000-1000-8000-00805f9b34fb"
         self.ACCESS_SERVICE_UUID = "00001800-0000-1000-8000-00805f9b34fb"
@@ -36,12 +36,30 @@ class FUKY_BleDeviceBase:
         
         # 多进程共享变量
         self.device_found_flag = multiprocessing.Value(ctypes.c_bool, False)
-        self.data_queue = multiprocessing.Queue()  # 用于传输BLE设备返回的数据
         self.ble_process = None
         
         # BLE设备对象（仅在BLE进程中有效）
         self.FUKY_Mouse_Device = None
         self.characteristic = None
+        
+        # 共享内存配置，主进程中创建的
+        self.Mouse_Mem_name = "FUKY_Mouse_Memory"
+        self.MouseSize = 32
+        self.Mouse_Mem = None  # 共享内存对象
+        
+    def init_shared_memory(self):
+        """在子进程中打开主进程创建的共享内存"""
+        try:
+            self.Mouse_Mem = mmap.mmap(
+                -1,
+                self.MouseSize,
+                tagname=self.Mouse_Mem_name,
+                access=mmap.ACCESS_WRITE
+            )
+            print("成功连接共享内存")
+        except Exception as e:
+            print(f"共享内存连接失败: {e}")
+            self.Mouse_Mem = None
         
     def start_ble_process(self):
         """启动BLE设备处理进程"""
@@ -53,35 +71,16 @@ class FUKY_BleDeviceBase:
         # 创建并启动进程
         self.ble_process = multiprocessing.Process(
             target=self.ble_process_function, 
-            args=(self.device_found_flag, self.data_queue)
+            args=(self.device_found_flag,)
         )
         self.ble_process.daemon = True  # 设置为守护进程，主进程退出时自动结束
         self.ble_process.start()
         
         print(f"已启动BLE设备处理进程，PID: {self.ble_process.pid}")
-        
     
     def is_device_found(self):
         """检查是否找到BLE设备"""
         return self.device_found_flag.value
-    
-    def get_data(self, block=False, timeout=None):
-        """从数据队列中获取数据
-        
-        Args:
-            block: 是否阻塞等待数据
-            timeout: 超时时间（秒）
-            
-        Returns:
-            数据，如果没有数据则返回None
-        """
-        try:
-            if block:
-                return self.data_queue.get(block=True, timeout=timeout)
-            else:
-                return self.data_queue.get_nowait()
-        except:
-            return None
     
     def stop_ble_process(self):
         """停止BLE设备处理进程"""
@@ -92,20 +91,21 @@ class FUKY_BleDeviceBase:
             
             self.ble_process = None
     
-    def ble_process_function(self, device_found_flag, data_queue):
+    def ble_process_function(self, device_found_flag):
         """BLE设备处理进程的主函数
         
         Args:
             device_found_flag: 多进程共享的标志位，表示是否找到设备
             data_queue: 多进程共享的队列，用于传输BLE设备返回的数据
         """
-        # 在子进程中创建共享内存实例
-        from fuky_SharedMemoryManager import FUKY_SharedMemory
+        # 在子进程中创建蓝牙处理实例
         ble_handler = FUKY_BleDeviceBase()
-        ble_handler.share_mem = FUKY_SharedMemory()  # 在子进程内部初始化共享内存
+
         # 使用传入的共享变量替换实例中的变量
         ble_handler.device_found_flag = device_found_flag
-        ble_handler.data_queue = data_queue
+        # 初始化子进程中蓝牙处理实例的共享内存，以便后面可以向其写入数据
+        ble_handler.init_shared_memory()  # 初始化共享内存
+        
         
         # 运行异步主函数
         if sys.platform == "win32":
@@ -139,8 +139,18 @@ class FUKY_BleDeviceBase:
         self.FUKY_Mouse_Device = await self.get_connected_ble_devices()
         if self.FUKY_Mouse_Device is None:
             print("未找到目标BLE设备，进程退出")
-            
             return
+        
+        while True:  # 添加循环，持续尝试连接
+            # 获取已连接的BLE设备
+            self.FUKY_Mouse_Device = await self.get_connected_ble_devices()
+            if self.FUKY_Mouse_Device is None:
+                print("未找到目标BLE设备，等待重试...")
+                await asyncio.sleep(5)  # 等待5秒后重试
+                continue
+            
+            print("蓝牙适配器已找到")
+            print(f"蓝牙地址: {adapter.bluetooth_address}")
         
         # 订阅特征值通知
         success = await self.subscribe_to_characteristic()
@@ -343,25 +353,26 @@ class FUKY_BleDeviceBase:
                             
                             
                             # 将数据写入共享内存
-                            if self.share_mem:
+                            if self.Mouse_Mem is not None:
                                 try:
-                                    # 打包数据为二进制格式 (7个float: 3个加速度 + 4个四元数)
+                            # 打包数据为二进制格式 (7个float: 3个加速度 + 4个四元数)
                                     packed_data = struct.pack(
                                         '<7f',  # 小端序，7个float32
                                         accel_float[0], accel_float[1], accel_float[2],
                                         quat_float[0], quat_float[1], quat_float[2], quat_float[3]
                                     )
-                                    # 写入共享内存
-                                    self.share_mem.Mouse_Write(packed_data)
+                                    # 直接写入共享内存
+                                    self.Mouse_Mem.seek(0)
+                                    self.Mouse_Mem.write(packed_data)
+                                    self.Mouse_Mem.flush()
                                     print("已将IMU数据写入共享内存")
                                 except Exception as e:
-                                    print(f"写入共享内存时出错: {e}")
+                                    print(f"写入共享内存失败: {e}")
+
+
                             
                         except Exception as e:
                             print(f"解析IMU数据时出错: {e}")
-                            
-                            # 如果解析失败，仍然将原始数据放入队列
-                            self.data_queue.put({'raw_data': data.hex()})
                     else:
                         if buffer:
                             print(f"收到数据长度不正确: {buffer.length}字节")
@@ -426,21 +437,6 @@ async def main():
         max_count = 30  # 最多等待30秒
         
         while count < max_count:
-            # 非阻塞方式检查队列
-            data = ble_device_base.get_data(block=False)
-            if data is not None:
-                if isinstance(data, dict):
-                    if 'accel' in data and 'quat' in data:
-                        print(f"收到IMU数据:")
-                        print(f"  原始数据: {data.get('raw_data', 'N/A')}")
-                        print(f"  加速度 (g): {data['accel']}")
-                        print(f"  四元数: {data['quat']}")
-                    else:
-                        print(f"收到原始数据: {data.get('raw_data', 'N/A')}")
-                else:
-                    print(f"收到数据: {data}")
-                
-            
             await asyncio.sleep(1)
             count += 1
             

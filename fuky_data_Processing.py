@@ -3,7 +3,7 @@ from fuky_device_base import FUKY_deviceBase
 import numpy as np
 import cv2
 import struct
-from fuky_PipeServer import FUKY_PipeServer
+import mmap
 
 class FUKY_DataHandler():
 
@@ -14,8 +14,8 @@ class FUKY_DataHandler():
         # ---------- 线程 ----------
         self.Device_Threading = threading.Thread(target=self.fuky_deivce_base.FUKY_Device_Main)# 硬件通讯底层
         self.Data_Threading = threading.Thread(target=self.FUKY_Data_Main)# 数据处理层
-        self.PipeServer = FUKY_PipeServer()# 数据传输层
-        self.PipeServer.PipeManager_Threading.start()
+
+
         # ---------- 数据处理层的关闭事件 ----------
         self.Close_event = threading.Event()
         # ---------- 参数 ----------
@@ -34,7 +34,7 @@ class FUKY_DataHandler():
         params = np.load(stereo_params_path)        # 加载立体标定参数
         
         # 打印参数内容 -------------------------------------------------
-        # 设置numpy打印格式：保留4位小数、禁止科学计数法（提升可读性）
+        # 设置numpy打印格式：保留4位小数
         np.set_printoptions(precision=4, suppress=True)
         
         print("\nLoaded parameters from", stereo_params_path)
@@ -76,11 +76,32 @@ class FUKY_DataHandler():
         
         self.Cam_Coord_Data = None        #最后得出的数据
         
+        # ---------- 共享内存的配置 ----------
+        self.Locator_Mem_name = "FUKY_Locator_Memory"
+        self.Locator_Size = 12
+        self.Locator_Mem = None  # 共享内存对象
+        
         cv2.setUseOptimized(True)  # 启用优化
         cv2.setNumThreads(4)       # 设置线程数
-        
+
+        # ---------- 初始化共享内存 ----------
+
+    def init_shared_memory(self):
+        """在子进程中打开主进程创建的共享内存"""
+        try:
+            self.Locator_Mem = mmap.mmap(
+                -1,
+                self.Locator_Size,
+                tagname=self.Locator_Mem_name,
+                access=mmap.ACCESS_WRITE
+            )
+            print("成功连接共享内存")
+        except Exception as e:
+            print(f"共享内存连接失败: {e}")
+            self.Locator_Mem = None
         # ---------- 异步处理图像主线程 ----------
     def FUKY_Data_Main(self):
+        self.init_shared_memory()
         self.Device_Threading.start()
         print("开始处理图像数据")
         while not self.Close_event.is_set():
@@ -214,21 +235,19 @@ class FUKY_DataHandler():
         point_3d = cv2.convertPointsFromHomogeneous(points_4d.T)
         
         # 将3D坐标写入共享内存
-        if self.share_mem:
+        if self.Locator_Mem is not None:
             try:
                 # 获取坐标值
                 x, y, z = point_3d[0][0].tolist()
                 # 打包为二进制格式
                 packed_data = struct.pack('<3f', x, y, z)  # 小端序，3个float32
-                # 写入共享内存
-                self.share_mem.Locator_Write(packed_data)
-                print("已将3D坐标写入共享内存")
+                # 直接写入共享内存
+                self.Locator_Mem.seek(0)
+                self.Locator_Mem.write(packed_data)
+                self.Locator_Mem.flush()
+                print("已将IMU数据写入共享内存")
             except Exception as e:
-                print(f"写入共享内存时出错: {e}")
-        
-        # 通过管道发送数据
-        self.PipeServer.send_point_3d(point_3d)
-        return point_3d[0][0].tolist()  # 返回 [X,Y,Z]
+                print(f"写入共享内存失败: {e}")
         
         # ---------- 调试用显示图像 ----------
 

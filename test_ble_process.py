@@ -5,7 +5,6 @@
 import asyncio
 import sys
 import time
-from fuky_SharedMemoryManager import FUKY_SharedMemory# 用于测试写入
 # 导入FUKY_BleDeviceBase类
 from fuky_device_BleData import FUKY_BleDeviceBase
 
