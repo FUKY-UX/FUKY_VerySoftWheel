@@ -5,7 +5,7 @@
 import asyncio
 import sys
 import time
-
+from fuky_SharedMemoryManager import FUKY_SharedMemory# 用于测试写入
 # 导入FUKY_BleDeviceBase类
 from fuky_device_BleData import FUKY_BleDeviceBase
 
@@ -13,9 +13,10 @@ async def main():
     """主函数 - 模拟主进程"""
     print("BLE设备处理进程测试程序")
     print("=" * 40)
-    
+    # 创建共享内存管理对象
+    SharedMem_Manager = FUKY_SharedMemory()
     # 创建BLE设备对象
-    ble_device_base = FUKY_BleDeviceBase()
+    ble_device_base = FUKY_BleDeviceBase(SharedMem_Manager)
     
     # 启动BLE设备处理进程
     ble_device_base.start_ble_process()

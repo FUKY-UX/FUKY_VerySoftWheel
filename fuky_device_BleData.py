@@ -9,7 +9,7 @@ import multiprocessing
 import time
 import ctypes  # 用于定义共享内存中的布尔类型
 import struct  # 用于解析二进制数据
-
+from winrt.windows.storage.streams import DataReader
 from winrt.windows.devices.bluetooth import BluetoothAdapter, BluetoothDevice, BluetoothLEDevice
 from winrt.windows.devices.bluetooth import BluetoothConnectionStatus
 from winrt.windows.devices.enumeration import DeviceInformation, DeviceInformationKind
@@ -307,9 +307,12 @@ class FUKY_BleDeviceBase:
                         # 创建一个字节数组来存储数据
                         data = bytearray(buffer.length)
                         
-                        # 将buffer中的数据复制到字节数组中
-                        for i in range(buffer.length):
-                            data[i] = buffer.get_byte(i)
+                        # 将buffer转换为字节数组
+                        if buffer and buffer.length == 14:  # 确保数据长度正确
+                            # 使用DataReader读取buffer数据
+                            reader = DataReader.from_buffer(buffer)
+                            data_bytes = reader.read_bytes(buffer.length)
+                            data = bytearray(data_bytes)
                         
                         # 解析IMU数据
                         try:
