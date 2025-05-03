@@ -25,6 +25,7 @@ class FUKY_BleDeviceBase:
     
     def __init__(self):
         """初始化蓝牙设备扫描器"""
+        self.share_mem = None  # 将在子进程中初始化
         self.DEVICE_NAME = "FUKY_MOUSE"
         self.SERVICE_UUID = "0000f233-0000-1000-8000-00805f9b34fb"
         self.ACCESS_SERVICE_UUID = "00001800-0000-1000-8000-00805f9b34fb"
@@ -46,7 +47,7 @@ class FUKY_BleDeviceBase:
         """启动BLE设备处理进程"""
         if self.ble_process is not None and self.ble_process.is_alive():
             print("BLE进程已经在运行中")
-            sys.stdout.flush()
+            
             return
         
         # 创建并启动进程
@@ -58,7 +59,7 @@ class FUKY_BleDeviceBase:
         self.ble_process.start()
         
         print(f"已启动BLE设备处理进程，PID: {self.ble_process.pid}")
-        sys.stdout.flush()
+        
     
     def is_device_found(self):
         """检查是否找到BLE设备"""
@@ -88,19 +89,20 @@ class FUKY_BleDeviceBase:
             self.ble_process.terminate()
             self.ble_process.join(timeout=1.0)
             print("已停止BLE设备处理进程")
-            sys.stdout.flush()
+            
             self.ble_process = None
     
-    @staticmethod
-    def ble_process_function(device_found_flag, data_queue):
+    def ble_process_function(self, device_found_flag, data_queue):
         """BLE设备处理进程的主函数
         
         Args:
             device_found_flag: 多进程共享的标志位，表示是否找到设备
             data_queue: 多进程共享的队列，用于传输BLE设备返回的数据
         """
-        # 创建一个新的FUKY_BleDeviceBase实例，用于BLE进程
+        # 在子进程中创建共享内存实例
+        from fuky_SharedMemoryManager import FUKY_SharedMemory
         ble_handler = FUKY_BleDeviceBase()
+        ble_handler.share_mem = FUKY_SharedMemory()  # 在子进程内部初始化共享内存
         # 使用传入的共享变量替换实例中的变量
         ble_handler.device_found_flag = device_found_flag
         ble_handler.data_queue = data_queue
@@ -110,46 +112,46 @@ class FUKY_BleDeviceBase:
             asyncio.run(ble_handler.async_main())
         else:
             print("错误: 此程序仅支持Windows平台")
-            sys.stdout.flush()
+            
     
     async def async_main(self):
         """BLE设备处理进程的异步主函数"""
         print("BLE设备处理进程已启动")
-        sys.stdout.flush()
+        
         
         # 获取蓝牙适配器
         adapter = await self.get_bluetooth_adapter()
         if adapter is None:
             print("无法获取蓝牙适配器，进程退出")
-            sys.stdout.flush()
+            
             return
         
         print("蓝牙适配器已找到")
         print(f"蓝牙地址: {adapter.bluetooth_address}")
-        sys.stdout.flush()
+        
         
         # 检查蓝牙是否开启
         if not adapter.is_central_role_supported:
             print("警告: 此蓝牙适配器不支持中央角色，可能无法扫描设备")
-            sys.stdout.flush()
+            
         
         # 获取已连接的BLE设备
         self.FUKY_Mouse_Device = await self.get_connected_ble_devices()
         if self.FUKY_Mouse_Device is None:
             print("未找到目标BLE设备，进程退出")
-            sys.stdout.flush()
+            
             return
         
         # 订阅特征值通知
         success = await self.subscribe_to_characteristic()
         if not success:
             print("订阅特征值通知失败，进程退出")
-            sys.stdout.flush()
+            
             return
         
         # 保持进程运行，处理特征值通知
         print("BLE设备已找到并订阅特征值通知，进程继续运行...")
-        sys.stdout.flush()
+        
         while True:
             await asyncio.sleep(1)
     
@@ -159,18 +161,18 @@ class FUKY_BleDeviceBase:
             adapter = await BluetoothAdapter.get_default_async()
             if adapter is None:
                 print("错误: 未找到蓝牙适配器")
-                sys.stdout.flush()
+                
                 return None
             return adapter
         except Exception as e:
             print(f"获取蓝牙适配器时出错: {e}")
-            sys.stdout.flush()
+            
             return None
     
     async def get_connected_ble_devices(self):
         """获取已连接的蓝牙低功耗(BLE)设备"""
         print("\n正在获取已连接的BLE设备...")
-        sys.stdout.flush()
+        
         try:
             # 使用BluetoothLEDevice的get_device_selector_from_connection_status方法获取已连接BLE设备的选择器
             selector = BluetoothLEDevice.get_device_selector_from_connection_status(BluetoothConnectionStatus.CONNECTED)
@@ -186,11 +188,11 @@ class FUKY_BleDeviceBase:
             
             if devices_info.size == 0:
                 print("未找到已连接的BLE设备")
-                sys.stdout.flush()
+                
                 return None
             
             print(f"\n找到 {devices_info.size} 个已连接的BLE设备:")
-            sys.stdout.flush()
+            
             
             # 遍历并打印设备信息
             for i, device_info in enumerate(devices_info):
@@ -206,7 +208,7 @@ class FUKY_BleDeviceBase:
                     # 打印基本设备信息
                     print(f"{i+1}. 名称: {device_name_found}")
                     print(f"   设备ID: {device_id}")
-                    sys.stdout.flush()
+                    
                     
                     # 尝试获取更多BLE设备信息
                     try:
@@ -215,49 +217,49 @@ class FUKY_BleDeviceBase:
                         if ble_device:
                             print(f"   蓝牙地址: {ble_device.bluetooth_address}")
                             print(f"   连接状态: {'已连接' if ble_device.connection_status == BluetoothConnectionStatus.CONNECTED else '未连接'}")
-                            sys.stdout.flush()
+                            
                             
                             # 尝试获取GATT服务信息
                             try:
                                 services = await ble_device.get_gatt_services_async()
                                 if services.status == 0:  # 成功
                                     print(f"   GATT服务数量: {services.services.size}")
-                                    sys.stdout.flush()
+                                    
                                     # 设置标志位，通知主进程已找到设备
                                     self.device_found_flag.value = True
                                     print("   已设置设备找到标志位")
-                                    sys.stdout.flush()
+                                    
                                     
                                     return ble_device
                             except Exception as e:
                                 print(f"   获取GATT服务时出错: {e}")
-                                sys.stdout.flush()
+                                
                     except Exception as e:
                         print(f"   获取BLE设备详细信息时出错: {e}")
-                        sys.stdout.flush()
+                        
             
             return None
         except Exception as e:
             print(f"获取已连接BLE设备时出错: {e}")
-            sys.stdout.flush()
+            
             return None
     
     async def subscribe_to_characteristic(self):
         """订阅BLE设备的特征值通知"""
         if self.FUKY_Mouse_Device is None:
             print("错误: 未找到BLE设备，无法订阅特征值")
-            sys.stdout.flush()
+            
             return False
         
         try:
             print(f"\n正在查找服务: {self.SERVICE_UUID}")
-            sys.stdout.flush()
+            
             
             # 获取目标服务
             services_result = await self.FUKY_Mouse_Device.get_gatt_services_async()
             if services_result.status != 0:
                 print(f"获取服务失败，状态码: {services_result.status}")
-                sys.stdout.flush()
+                
                 return False
             
             target_service = None
@@ -265,19 +267,19 @@ class FUKY_BleDeviceBase:
                 if str(service.uuid).lower() == self.SERVICE_UUID.lower():
                     target_service = service
                     print(f"找到目标服务: {service.uuid}")
-                    sys.stdout.flush()
+                    
                     break
             
             if target_service is None:
                 print(f"未找到目标服务: {self.SERVICE_UUID}")
-                sys.stdout.flush()
+                
                 return False
             
             # 获取目标特征值
             characteristics_result = await target_service.get_characteristics_async()
             if characteristics_result.status != 0:
                 print(f"获取特征值失败，状态码: {characteristics_result.status}")
-                sys.stdout.flush()
+                
                 return False
             
             target_characteristic = None
@@ -285,12 +287,12 @@ class FUKY_BleDeviceBase:
                 if str(characteristic.uuid).lower() == self.CHARACTERISTIC_UUID.lower():
                     target_characteristic = characteristic
                     print(f"找到目标特征值: {characteristic.uuid}")
-                    sys.stdout.flush()
+                    
                     break
             
             if target_characteristic is None:
                 print(f"未找到目标特征值: {self.CHARACTERISTIC_UUID}")
-                sys.stdout.flush()
+                
                 return False
             
             # 保存找到的特征值对象
@@ -338,15 +340,26 @@ class FUKY_BleDeviceBase:
                             print(f"  原始数据: {data.hex()}")
                             print(f"  加速度 (g): {accel_float}")
                             print(f"  四元数: {quat_float}")
-                            sys.stdout.flush()
                             
-                            # 将数据放入队列，供主进程使用
-                            self.data_queue.put(imu_data)
-                            print("已将解析后的IMU数据放入队列")
-                            sys.stdout.flush()
+                            
+                            # 将数据写入共享内存
+                            if self.share_mem:
+                                try:
+                                    # 打包数据为二进制格式 (7个float: 3个加速度 + 4个四元数)
+                                    packed_data = struct.pack(
+                                        '<7f',  # 小端序，7个float32
+                                        accel_float[0], accel_float[1], accel_float[2],
+                                        quat_float[0], quat_float[1], quat_float[2], quat_float[3]
+                                    )
+                                    # 写入共享内存
+                                    self.share_mem.Mouse_Write(packed_data)
+                                    print("已将IMU数据写入共享内存")
+                                except Exception as e:
+                                    print(f"写入共享内存时出错: {e}")
+                            
                         except Exception as e:
                             print(f"解析IMU数据时出错: {e}")
-                            sys.stdout.flush()
+                            
                             # 如果解析失败，仍然将原始数据放入队列
                             self.data_queue.put({'raw_data': data.hex()})
                     else:
@@ -354,11 +367,11 @@ class FUKY_BleDeviceBase:
                             print(f"收到数据长度不正确: {buffer.length}字节")
                         else:
                             print("收到空buffer")
-                        sys.stdout.flush()
+                        
                         
                 except Exception as e:
                     print(f"处理特征值通知时出错: {e}")
-                    sys.stdout.flush()
+                    
             
             # 添加事件处理函数
             target_characteristic.add_value_changed(value_changed_handler)
@@ -370,23 +383,23 @@ class FUKY_BleDeviceBase:
             
             if config_result == 0:  # 成功
                 print("成功订阅特征值通知")
-                sys.stdout.flush()
+                
                 return True
             else:
                 print(f"订阅特征值通知失败，状态码: {config_result}")
-                sys.stdout.flush()
+                
                 return False
             
         except Exception as e:
             print(f"订阅特征值时出错: {e}")
-            sys.stdout.flush()
+            
             return False
 
 async def main():
     """主函数 - 用于测试"""
     print("FUKY_BleDeviceBase测试程序")
     print("=" * 40)
-    sys.stdout.flush()
+    
     
     # 创建BLE设备对象
     ble_device_base = FUKY_BleDeviceBase()
@@ -396,19 +409,19 @@ async def main():
     
     # 等待设备被找到
     print("等待BLE设备被找到...")
-    sys.stdout.flush()
+    
     try:
         while not ble_device_base.is_device_found():
             print("检查标志位: ", ble_device_base.is_device_found())
-            sys.stdout.flush()
+            
             await asyncio.sleep(1)
         
         print("BLE设备已找到！标志位已设置为True")
-        sys.stdout.flush()
+        
         
         # 从队列中读取数据
         print("\n开始从队列中读取数据...")
-        sys.stdout.flush()
+        
         count = 0
         max_count = 30  # 最多等待30秒
         
@@ -426,7 +439,7 @@ async def main():
                         print(f"收到原始数据: {data.get('raw_data', 'N/A')}")
                 else:
                     print(f"收到数据: {data}")
-                sys.stdout.flush()
+                
             
             await asyncio.sleep(1)
             count += 1
@@ -434,16 +447,16 @@ async def main():
             # 每5秒打印一次状态
             if count % 5 == 0:
                 print(f"等待数据中... {count}/{max_count}")
-                sys.stdout.flush()
+                
     
     except KeyboardInterrupt:
         print("程序被用户中断")
-        sys.stdout.flush()
+        
     finally:
         # 停止BLE设备处理进程
         ble_device_base.stop_ble_process()
         print("\n测试完成")
-        sys.stdout.flush()
+        
 
 if __name__ == "__main__":
     # 运行异步主函数
@@ -451,4 +464,3 @@ if __name__ == "__main__":
         asyncio.run(main())
     else:
         print("错误: 此程序仅支持Windows平台")
-        sys.stdout.flush()

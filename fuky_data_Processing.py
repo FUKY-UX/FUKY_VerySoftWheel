@@ -2,12 +2,13 @@ import threading
 from fuky_device_base import FUKY_deviceBase
 import numpy as np
 import cv2
+import struct
 from fuky_PipeServer import FUKY_PipeServer
 
 class FUKY_DataHandler():
 
-    def __init__(self):
-        
+    def __init__(self, share_mem=None):
+        self.share_mem = share_mem
         self.fuky_deivce_base = FUKY_deviceBase()
         self.imgProcessing_lock = threading.Lock()  # 新增线程锁，用户层希望获取图像数据时用到
         # ---------- 线程 ----------
@@ -211,6 +212,21 @@ class FUKY_DataHandler():
         
         # 转换为三维坐标 (齐次坐标转笛卡尔坐标)
         point_3d = cv2.convertPointsFromHomogeneous(points_4d.T)
+        
+        # 将3D坐标写入共享内存
+        if self.share_mem:
+            try:
+                # 获取坐标值
+                x, y, z = point_3d[0][0].tolist()
+                # 打包为二进制格式
+                packed_data = struct.pack('<3f', x, y, z)  # 小端序，3个float32
+                # 写入共享内存
+                self.share_mem.Locator_Write(packed_data)
+                print("已将3D坐标写入共享内存")
+            except Exception as e:
+                print(f"写入共享内存时出错: {e}")
+        
+        # 通过管道发送数据
         self.PipeServer.send_point_3d(point_3d)
         return point_3d[0][0].tolist()  # 返回 [X,Y,Z]
         
@@ -259,4 +275,3 @@ if __name__ == "__main__":
     
     show_Threading.start()
     Processing_Threading.start()
-        

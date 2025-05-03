@@ -13,10 +13,9 @@ async def main():
     """主函数 - 模拟主进程"""
     print("BLE设备处理进程测试程序")
     print("=" * 40)
-    # 创建共享内存管理对象
-    SharedMem_Manager = FUKY_SharedMemory()
+
     # 创建BLE设备对象
-    ble_device_base = FUKY_BleDeviceBase(SharedMem_Manager)
+    ble_device_base = FUKY_BleDeviceBase()
     
     # 启动BLE设备处理进程
     ble_device_base.start_ble_process()
