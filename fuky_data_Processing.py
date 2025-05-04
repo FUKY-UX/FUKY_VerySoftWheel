@@ -268,7 +268,7 @@ class FUKY_DataHandler():
                 
                 # 检测退出按键
                 if cv2.waitKey(25) & 0xFF == ord('q'):
-                    self.fuky_deivce_base.Close_FUKY_Device()
+                    self.Close_fuky_data_processing()
                     break
                     
             except Exception as e:
@@ -279,8 +279,67 @@ class FUKY_DataHandler():
 
         # ---------- 关闭函数 ----------
     def Close_fuky_data_processing(self):
-        self.fuky_deivce_base.Close_FUKY_Device()
-        self.Close_event.set()
+        """安全关闭所有数据处理的资源"""
+        try:
+            print("[DataHandler] 开始关闭数据处理...")
+            
+            # ========== 阶段1：设置关闭标志 ==========
+            self.Close_event.set()
+            
+            # ========== 阶段2：停止设备通信 ==========
+            if hasattr(self.fuky_deivce_base, 'Close_FUKY_Device'):
+                self.fuky_deivce_base.Close_FUKY_Device()
+            
+            # ========== 阶段3：停止子线程 ==========
+            # 停止设备通信线程
+            if self.Device_Threading.is_alive():
+                print("[DataHandler] 等待设备线程停止...")
+                self.Device_Threading.join(timeout=6)
+                if self.Device_Threading.is_alive():
+                    print("[DataHandler] 警告：设备线程未正常终止！")
+    
+            # 停止数据处理线程
+            if self.Data_Threading.is_alive():
+                print("[DataHandler] 等待数据处理线程停止...")
+                self.Data_Threading.join(timeout=6)
+                if self.Data_Threading.is_alive():
+                    print("[DataHandler] 警告：数据处理线程未正常终止！")
+    
+            # ========== 阶段4：释放OpenCV资源 ==========
+            print("[DataHandler] 释放OpenCV资源...")
+            cv2.destroyAllWindows()
+            
+            # 显式释放摄像头资源（如果设备层未释放）
+            if hasattr(self.fuky_deivce_base, 'cap1'):
+                if self.fuky_deivce_base.cap1.isOpened():
+                    self.fuky_deivce_base.cap1.release()
+            if hasattr(self.fuky_deivce_base, 'cap2'):
+                if self.fuky_deivce_base.cap2.isOpened():
+                    self.fuky_deivce_base.cap2.release()
+    
+            # ========== 阶段5：清理内存资源 ==========
+            print("[DataHandler] 清理共享内存...")
+            if self.Locator_Mem:
+                self.Locator_Mem.close()
+                self.Locator_Mem = None
+    
+            # ========== 阶段6：重置状态变量 ==========
+            with self.imgProcessing_lock:
+                self.prev_frame1 = None
+                self.prev_frame2 = None
+                self.left_frame1 = None
+                self.right_frame2 = None
+                self.Process_img1 = None
+                self.Process_img2 = None
+    
+            print("[DataHandler] 资源释放完成")
+    
+        except Exception as e:
+            print(f"[DataHandler] 关闭时发生异常: {str(e)}")
+        finally:
+            # 最终保障：强制清空OpenCV线程池
+            cv2.destroyAllWindows()
+            cv2.setNumThreads(0)
         
 
         

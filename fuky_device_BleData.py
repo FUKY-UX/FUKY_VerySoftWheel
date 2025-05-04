@@ -148,9 +148,7 @@ class FUKY_BleDeviceBase:
                 print("未找到目标BLE设备，等待重试...")
                 await asyncio.sleep(5)  # 等待5秒后重试
                 continue
-            
-            print("蓝牙适配器已找到")
-            print(f"蓝牙地址: {adapter.bluetooth_address}")
+            break
         
         # 订阅特征值通知
         success = await self.subscribe_to_characteristic()
@@ -238,7 +236,6 @@ class FUKY_BleDeviceBase:
                                     # 设置标志位，通知主进程已找到设备
                                     self.device_found_flag.value = True
                                     print("   已设置设备找到标志位")
-                                    
                                     
                                     return ble_device
                             except Exception as e:

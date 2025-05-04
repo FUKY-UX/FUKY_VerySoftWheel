@@ -11,6 +11,9 @@ from fuky_device_BleData import FUKY_BleDeviceBase
 import threading
 import cv2
 import mmap
+import os
+import ctypes
+from ctypes import wintypes
 
 import sys
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QSystemTrayIcon, QMenu, 
@@ -32,12 +35,12 @@ class FUKYWindow(QMainWindow):
         self.ImgDataHandler_Thread = threading.Thread(target=self.ImgDataHandler.FUKY_Data_Main)
 
         # 蓝牙处理的进程，利用多核CPU，提高效率，避免高频的IMU数据与低频的图像数据相互影响
-        # 启动BLE设备处理进程
+
         self.BleFukyDataHandler = FUKY_BleDeviceBase()
-        self.BleFukyDataHandler.start_ble_process()
+        self.BleFukyDataHandler.start_ble_process()        # 启动BLE设备处理进程
 
 
-        # ---------- 初始化 ----------
+# ---------- 初始化 ----------
 
     def initUI(self):
         # 添加定时器（主线程中运行）
@@ -138,30 +141,8 @@ class FUKYWindow(QMainWindow):
         # 绑定双击事件
         self.tray_icon.activated.connect(self.trayDoubleClick)
 
-    def initShareMem(self):
-        self.Mouse_Mem_name="FUKY_Mouse_Memory"
-        self.MouseSize = 32
-        self.Locator_Mem_name="FUKY_Locator_Memory"
-        self.LocatorSize = 12
-        # 创建Mouse共享内存
-        self.Mouse_Mem = mmap.mmap(
-            -1,  # 使用匿名映射
-            self.MouseSize,
-            self.Mouse_Mem_name,
-            access=mmap.ACCESS_WRITE
-        )
-        self.ClearMemory(self.Mouse_Mem,self.MouseSize)
-        # 创建Locator共享内存
-        self.Locator_Mem = mmap.mmap(
-            -1,  # 使用匿名映射
-            self.LocatorSize,
-            self.Locator_Mem_name,
-            access=mmap.ACCESS_WRITE
-        )
-        self.ClearMemory(self.Locator_Mem,self.LocatorSize)
 
-
-        # ---------- 更新视频显示 ----------
+# ---------- 更新视频显示 ----------
 
     def update_images(self):
         """更新图像显示"""
@@ -207,34 +188,137 @@ class FUKYWindow(QMainWindow):
         except Exception as e:
             print(f"图像更新总错误: {str(e)}")
         
-        # ---------- 托盘功能 ----------
+# ---------- 托盘功能 ----------
 
     def trayDoubleClick(self, reason):
         if reason == QSystemTrayIcon.DoubleClick:
             self.showNormal()
 
-        # ---------- 退出应用 ----------
+# ---------- 退出应用 ----------
 
     def quitApp(self):
         reply = QMessageBox.question(self, '确认退出', '确定要退出吗？',QMessageBox.Yes | QMessageBox.No)
         if reply == QMessageBox.Yes:
-            self.ImgDataHandler.Close_fuky_data_processing()
-            if self.Mouse_Mem:
+            try:   
+                # ==========关闭共享内存==========  
                 self.Mouse_Mem.close()
-            if self.Locator_Mem:
                 self.Locator_Mem.close()#清理共享内存
-            self.tray_icon.hide()
-            self.close()
-            QApplication.quit()
-      
-        # ---------- 共享内存管理 ----------
+                self.timer.stop()# 停止定时器
+                # ==========关闭图像处理线程==========
+                self.ImgDataHandler.Close_fuky_data_processing()
+                # 等待图像处理线程结束（最多等待6秒）
+                if self.ImgDataHandler_Thread.is_alive():
+                    self.ImgDataHandler_Thread.join(timeout=6)
+                    if self.ImgDataHandler_Thread.is_alive():
+                        print("警告：图像处理线程未能正常终止")
+                # ==========关闭蓝牙进程==========  
+                # 终止蓝牙进程（如果启用）
+                if hasattr(self.BleFukyDataHandler, 'is_alive'):
+                    if self.BleFukyDataHandler.is_alive():
+                        self.BleFukyDataHandler.terminate()
+                        self.BleFukyDataHandler.join(timeout=6)
+                # ==========销毁系统托盘==========  
+                self.tray_icon.hide()
+                self.tray_icon.deleteLater()  # 延迟删除对象
+                QApplication.processEvents()  # 处理未完成的事件
+                # ==========退出应用==========  
+                QApplication.quit()
+                self.close()  # 确保主窗口关闭
+                # ==========退出Python后台==========  
+                sys.exit(0)  # 确保Python进程终止
+            except Exception as e:
+                print(f"退出时发生错误: {str(e)}")
+                os._exit(1)  # 强制终止
+        
+# ---------- 共享内存管理 ----------
     
+    def _setup_shared_memory_apis(self):
+        """初始化Windows共享内存相关API"""
+        self.kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        
+        # 定义OpenFileMappingW函数
+        self.OpenFileMappingW = self.kernel32.OpenFileMappingW
+        self.OpenFileMappingW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
+        self.OpenFileMappingW.restype = wintypes.HANDLE
+        
+        # 定义CloseHandle函数
+        self.CloseHandle = self.kernel32.CloseHandle
+        self.CloseHandle.argtypes = [wintypes.HANDLE]
+        self.CloseHandle.restype = wintypes.BOOL
+        
+        # 定义所需常量
+        self.FILE_MAP_ALL_ACCESS = 0xF001F  # 完全访问权限
+
+    def _force_remove_shared_memory(self, mem_name):
+        """强制删除已存在的共享内存"""
+        try:
+            # 将内存名称转换为Windows API需要的宽字符串格式
+            mem_name_wide = ctypes.create_unicode_buffer(mem_name)
+            
+            # 尝试打开现有的共享内存
+            h_map = self.OpenFileMappingW(
+                self.FILE_MAP_ALL_ACCESS,  # 访问权限
+                False,                     # 不继承句柄
+                ctypes.byref(mem_name_wide) # 内存名称
+            )
+            
+            # 如果成功获取到句柄（不等于0和INVALID_HANDLE_VALUE）
+            if h_map not in (0, wintypes.HANDLE(-1).value):
+                print(f"找到已存在的共享内存 {mem_name}，正在强制删除...")
+                if self.CloseHandle(h_map):
+                    print(f"成功关闭共享内存句柄: {mem_name}")
+                else:
+                    print(f"关闭句柄失败，错误代码: {ctypes.get_last_error()}")
+        except Exception as e:
+            print(f"删除共享内存时发生异常: {str(e)}")
+
+    def initShareMem(self):
+        self.Mouse_Mem_name="FUKY_Mouse_Memory"
+        self.MouseSize = 32
+        self.Locator_Mem_name="FUKY_Locator_Memory"
+        self.LocatorSize = 12
+
+       # 强制删除可能残留的共享内存
+        self._force_remove_shared_memory(self.Mouse_Mem_name)
+        self._force_remove_shared_memory(self.Locator_Mem_name)
+
+        # 创建Mouse共享内存（带异常处理）
+        try:
+            self.Mouse_Mem = mmap.mmap(
+                -1,                       # 匿名映射
+                self.MouseSize,           # 内存大小
+                tagname=self.Mouse_Mem_name,  # 内存标签名
+                access=mmap.ACCESS_WRITE  # 写权限
+            )
+            self.ClearMemory(self.Mouse_Mem, self.MouseSize)
+            print(f"成功创建Mouse共享内存: {self.Mouse_Mem_name}")
+        except mmap.error as e:
+            print(f"创建Mouse共享内存失败: {e}")
+            # 这里可以添加重试逻辑或抛出异常
+
+        # 创建Locator共享内存（带异常处理）
+        try:
+            self.Locator_Mem = mmap.mmap(
+                -1,
+                self.LocatorSize,
+                tagname=self.Locator_Mem_name,
+                access=mmap.ACCESS_WRITE
+            )
+            self.ClearMemory(self.Locator_Mem, self.LocatorSize)
+            print(f"成功创建Locator共享内存: {self.Locator_Mem_name}")
+        except mmap.error as e:
+            print(f"创建Locator共享内存失败: {e}")
+            # 这里可以添加重试逻辑或抛出异常
+
+
     def ClearMemory(self, Target, size):
         # 清空内存区域
         Target.seek(0)
         Target.write(b'\x00' * size)
         
+
         
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)

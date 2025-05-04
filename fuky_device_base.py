@@ -3,6 +3,7 @@ import serial.tools.list_ports
 import struct
 import threading
 import time
+import os
 
 import cv2
 import numpy as np
@@ -52,10 +53,10 @@ class FUKY_deviceBase():
         self.Clear_Connect()
         time.sleep(1)
         print("搜索FUKY LOCATOR设备...")
-        while self.device_port1 == None or self.device_port2 == None:
+        while (self.device_port1 == None or self.device_port2 == None ) and not self.Close_event.is_set():  # 添加中断检查:
             self.find_fuky_locator_port()
             time.sleep(1)
-        while not self.serial_IsConnect:
+        while not self.serial_IsConnect and not self.Close_event.is_set():
             self.get_ser_test_connect()      
 
     def find_fuky_locator_port(self):
@@ -125,7 +126,8 @@ class FUKY_deviceBase():
                 self.Cam1_thread.join()
                 self.Cam2_thread.join()
                 time.sleep(5)
-                self.Clear_And_Restart()
+                if not self.Close_event.is_set():
+                    self.Clear_And_Restart()
 
         # ---------- 数据读取线程 ----------
 
@@ -245,6 +247,8 @@ class FUKY_deviceBase():
         """安全断开所有串口连接"""
         """重置所有事件"""
         """新建新的进程"""
+        if self.Close_event.is_set():
+            return
         self.stop_stream_command()
         self.Stop_Cam_event.set()
         #self.Close_event.set()
@@ -272,8 +276,82 @@ class FUKY_deviceBase():
 
 
     def Close_FUKY_Device(self):
-        self.Stop_Cam_event.set()
-        self.Close_event.set()
+        """安全关闭所有设备连接和线程"""
+        try:
+            print("[Device] 正在关闭设备连接...")
+            
+            # ========== 阶段1：设置关闭标志 ==========
+            self.Close_event.set()      # 停止主循环
+            self.Stop_Cam_event.set()  # 停止摄像头数据采集
+            
+            # ========== 阶段2：停止数据流 ==========
+            self.stop_stream_command()
+            
+            # ========== 阶段3：终止硬件连接 ==========
+            # 关闭串口连接（带异常处理）
+            if self.serial_ser1 and self.serial_ser1.is_open:
+                try:
+                    self.serial_ser1.flush()
+                    self.serial_ser1.close()
+                except Exception as e:
+                    print(f"关闭串口1时发生异常: {str(e)}")
+                finally:
+                    self.serial_ser1 = None
+                    
+            if self.serial_ser2 and self.serial_ser2.is_open:
+                try:
+                    self.serial_ser2.flush()
+                    self.serial_ser2.close()
+                except Exception as e:
+                    print(f"关闭串口2时发生异常: {str(e)}")
+                finally:
+                    self.serial_ser2 = None
+            
+            # ========== 阶段4：停止线程 ==========
+            # 等待摄像头线程停止（带超时）
+            thread_timeout = 2  # 秒
+            
+            def safe_join(thread, name):
+                if thread and thread.is_alive():
+                    print(f"[Device] 等待{name}线程停止...")
+                    thread.join(thread_timeout)
+                    if thread.is_alive():
+                        print(f"[Device] 警告：{name}线程未正常终止！")
+    
+            safe_join(self.Cam1_thread, "摄像头1")
+            safe_join(self.Cam2_thread, "摄像头2")
+            safe_join(self.FindingDevice_thread, "设备搜索")
+            safe_join(self.FUKY_Device_MainThread, "设备主线程")
+            
+            # ========== 阶段5：清理资源 ==========
+            print("[Device] 清理内存资源...")
+            with self.FukyWriting_lock_1:
+                self.img_data1 = None
+            with self.FukyWriting_lock_2:
+                self.img_data2 = None
+                
+            # 重置设备状态
+            self.device_port1 = None
+            self.device_port2 = None
+            self.serial_IsConnect = False
+            
+            # ========== 阶段6：强制清理 ==========
+            # 确保OpenCV窗口关闭
+            cv2.destroyAllWindows()
+            
+            # 重置所有事件
+            self.img1_Data_event.clear()
+            self.img2_Data_event.clear()
+            
+            print("[Device] 设备连接已安全关闭")
+            
+        except Exception as e:
+            print(f"[Device] 关闭时发生严重错误: {str(e)}")
+        finally:
+            # 最终保障：如果仍有存活线程则强制终止
+            if self.Cam1_thread.is_alive() or self.Cam2_thread.is_alive():
+                print("[Device] 强制终止残留线程")
+                os._exit(1)
         
     def Clear_Connect(self):
         """如果有正在运行的读取线程就停止，并新建新的进程"""
