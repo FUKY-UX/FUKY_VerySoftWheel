@@ -319,7 +319,7 @@ class FUKYWindow(QMainWindow):
 
         
 
-if __name__ == "__main__":
+def main():
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     if not QSystemTrayIcon.isSystemTrayAvailable():
@@ -329,6 +329,23 @@ if __name__ == "__main__":
     window = FUKYWindow()
     window.show()
     # 初始化数据处理线程
-
     window.ImgDataHandler_Thread.start()
     sys.exit(app.exec_())
+
+if __name__ == "__main__":
+    # 确保只有一个实例运行
+    import ctypes
+    import win32event
+    import win32api
+    import winerror
+    
+    # 创建一个互斥体，确保只有一个实例运行
+    mutex_name = "FUKY_DRIVER_MUTEX"
+    mutex = win32event.CreateMutex(None, 1, mutex_name)
+    if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
+        # 如果互斥体已存在，说明已经有一个实例在运行
+        print("程序已经在运行中，不允许多个实例同时运行")
+        sys.exit(0)
+    
+    # 如果互斥体不存在，说明这是第一个实例，继续运行
+    main()
