@@ -7,11 +7,11 @@ import os
 
 import cv2
 import numpy as np
-
+from multiprocessing import Process
 #FUKY LOCATOR的基础
-#更多注释会在后面添加
-#暂时没有添加自动区分左右镜头的功能，暂时确定img_data1是左边，img_data2是右边，如果重启电脑或插拔位置不对，就会改变
-#还有一些小bug
+#主要提供一个主进程和两个子进程
+#左右摄像头需要手动确定
+#
 
 
 
@@ -307,7 +307,7 @@ class FUKY_deviceBase():
                 finally:
                     self.serial_ser2 = None
             
-            # ========== 阶段4：停止线程 ==========
+            # ========== 阶段4：停止进程 ==========
             # 等待摄像头线程停止（带超时）
             thread_timeout = 2  # 秒
             

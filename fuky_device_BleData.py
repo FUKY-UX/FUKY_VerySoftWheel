@@ -30,11 +30,13 @@ class FUKY_BleDeviceBase:
         self.SERVICE_UUID = "0000f233-0000-1000-8000-00805f9b34fb"
         self.ACCESS_SERVICE_UUID = "00001800-0000-1000-8000-00805f9b34fb"
         self.CHARACTERISTIC_UUID = "0000f666-0000-1000-8000-00805f9b34fb"
+        self.CHARACTERISTIC_UUID = "0000f667-0000-1000-8000-00805f9b34fb"
+        self.CHARACTERISTIC_UUID = "0000f668-0000-1000-8000-00805f9b34fb"
         self.HID_SERVICE_UUID = "00001812-0000-1000-8000-00805f9b34fb"
         self.SCALE_Q14 = 1.0 / (1 << 14)
         self.SCALE_Q8 = 1.0 / (1 << 8)
         
-        # 多进程共享变量
+        # 进程共享变量
         self.device_found_flag = multiprocessing.Value(ctypes.c_bool, False)
         self.ble_process = None
         
@@ -130,7 +132,7 @@ class FUKY_BleDeviceBase:
         print(f"蓝牙地址: {adapter.bluetooth_address}")
         
         
-        # 检查蓝牙是否开启
+        # 检查蓝牙
         if not adapter.is_central_role_supported:
             print("警告: 此蓝牙适配器不支持中央角色，可能无法扫描设备")
             
@@ -391,16 +393,12 @@ class FUKY_BleDeviceBase:
             
             if config_result == 0:  # 成功
                 print("成功订阅特征值通知")
-                
                 return True
             else:
                 print(f"订阅特征值通知失败，状态码: {config_result}")
-                
                 return False
-            
         except Exception as e:
             print(f"订阅特征值时出错: {e}")
-            
             return False
 
 async def main():
