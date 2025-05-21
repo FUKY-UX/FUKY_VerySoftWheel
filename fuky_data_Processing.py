@@ -27,8 +27,7 @@ class FUKY_DataHandler():
         self.Process_img1 = None       #调试用图像，调试输出
         self.Process_img2 = None
         
-        self.Bin_img1 = None       #二值化后的图像
-        self.Bin_img2 = None
+
 
         self.threshold_value = 127        # 二分阈值
         # 计算坐标用的参数
@@ -137,15 +136,18 @@ class FUKY_DataHandler():
     def fuky_processing1(self,gray_imgdata):
         """调整图像的对比度和曝光度，减去上一帧图像，留下运动中的光斑，参数暂时硬编码到了代码中"""
         # 1. 调整对比度和曝光度
-        adjusted_gray_img = cv2.convertScaleAbs(gray_imgdata, 1, 8)
+        adjusted_gray_img = cv2.convertScaleAbs(gray_imgdata, 1, 10)
 
         # 2. 模糊，去掉莫名其妙的高频噪声 
         blurred_diff = cv2.blur(adjusted_gray_img, (5,5))  
         # 3. 二值化
         _, binary_img1 = cv2.threshold(blurred_diff, self.threshold_value, 255, cv2.THRESH_BINARY)
-        self.Bin_img1 = binary_img1.copy()
         # 4. 帧差
         if self.prev_frame1 is None:
+            #进行膨胀处理
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5,5))
+            dilated_prev = cv2.dilate(binary_img1, kernel, iterations=1)
+            self.prev_frame1 = dilated_prev
             return binary_img1
         frame_diff1 = cv2.subtract(binary_img1,self.prev_frame1)# 现在这个帧不再是上一帧，而是摄像头没捕捉到红点的前一帧画面
         return frame_diff1
@@ -153,39 +155,41 @@ class FUKY_DataHandler():
     def fuky_processing2(self,gray_imgdata):
         """调整图像的对比度和曝光度，减去上一帧图像，留下运动中的光斑,参数暂时硬编码到了代码中"""
         # 1. 调整对比度和曝光度
-        adjusted_gray_img = cv2.convertScaleAbs(gray_imgdata, 1, 8)
+        adjusted_gray_img = cv2.convertScaleAbs(gray_imgdata, 1, 10)
 
         # 2. 模糊，去掉莫名其妙的高频噪声 （均值滤波）
         blurred_diff = cv2.blur(adjusted_gray_img, (5,5))  
         # 3. 二值化
         _, binary_img2 = cv2.threshold(blurred_diff, self.threshold_value, 255, cv2.THRESH_BINARY)
-        self.Bin_img2 = binary_img2.copy()
         # 4. 帧差
         if self.prev_frame2 is None:
+            #进行膨胀处理
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5,5))
+            dilated_prev = cv2.dilate(binary_img2, kernel, iterations=1)
+            self.prev_frame2 = dilated_prev
             return binary_img2
-        # 对前一帧进行膨胀处理
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3,3))
-        dilated_prev = cv2.dilate(self.prev_frame2, kernel, iterations=1)
-        frame_diff2 = cv2.subtract(binary_img2,dilated_prev)# 现在这个帧不再是上一帧，而是摄像头没捕捉到红点的前一帧画面
+
+        frame_diff2 = cv2.subtract(binary_img2,self.prev_frame2)# 现在这个帧不再是上一帧，而是摄像头没捕捉到红点的前一帧画面
         return frame_diff2
         # ---------- 算法部分(全是opencv的功劳，不要看我) ----------
 
     def fuky_detect_point(self):
-        self.Process_img1,self.Left_spot ,IsDetected1 = self.detect_spot_centroids(self.left_frame1)
-        if(not IsDetected1):
-            self.prev_frame1 = self.Bin_img1
-        self.Process_img2,self.Right_spot ,IsDetected2 = self.detect_spot_centroids(self.right_frame2)
-        if(not IsDetected2):
-            self.prev_frame2 = self.Bin_img2
+        self.Process_img1,Local_Left_spot ,IsDetected1 = self.detect_spot_centroids(self.left_frame1)
+        self.Process_img2,Local_Right_spot ,IsDetected2 = self.detect_spot_centroids(self.right_frame2)
+            
         self.Right_Ready = False
         self.Left_Ready = False
+        if(Local_Left_spot is not None):
+            self.Left_spot = Local_Left_spot
+        if(Local_Right_spot is not None):
+            self.Right_spot = Local_Right_spot
         
     def fuky_Cal_point(self):
         if self.Left_spot is not None and self.Right_spot is not None:
             calibrated_l,calibrated_r = self.rectify_points(self.Left_spot,self.Right_spot)
             self.triangulate(calibrated_l,calibrated_r)
 
-    def detect_spot_centroids(self, binary_img, min_area=25,max_area=300):
+    def detect_spot_centroids(self, binary_img, min_area=15,max_area=500):
         num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(
             binary_img.astype(np.uint8), 
             connectivity=4
@@ -212,7 +216,7 @@ class FUKY_DataHandler():
                 cv2.circle(result_img, 
                           (int(round(x)), int(round(y))), 
                           radius=3, color=(0, 0, 255), thickness=-1)
-                print(f"发现有效连通域，面积：{areas[valid_indices[max_area_idx]]}")
+                #print(f"发现有效连通域，面积：{areas[valid_indices[max_area_idx]]}")
                 return result_img, max_centroid, True        
         return result_img, None, False
             
@@ -248,7 +252,7 @@ class FUKY_DataHandler():
         
         # 转换为三维坐标 (齐次坐标转笛卡尔坐标)
         point_3d = cv2.convertPointsFromHomogeneous(points_4d.T)
-        
+        #print(f"3D点: {point_3d}")
         # 将3D坐标写入共享内存
         if self.Locator_Mem is not None:
             try:

@@ -352,7 +352,6 @@ class FUKY_BleBase:
                                         pressure_value = reader.read_uint16()
                                         
                                         # 打印压力百分比值
-                                        print("\n压力传感器更新：")
                                         print(f"  压力百分比: {pressure_value} (0x{pressure_value:04X})")
                                         
                                         # 写入共享内存（两个字节）
@@ -408,8 +407,7 @@ class FUKY_BleBase:
                 break    
             break
         
-        await asyncio.sleep(30)  # 等待15秒关闭
-        print("测试完毕，释放所有蓝牙资源")
+        print("工作完毕，释放所有蓝牙资源")
         if imu_event_token is not None:
             print("已尝试移除回调函数")
             imu_char.remove_value_changed(imu_event_token)
