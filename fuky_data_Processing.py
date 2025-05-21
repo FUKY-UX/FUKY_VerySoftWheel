@@ -180,9 +180,9 @@ class FUKY_DataHandler():
         self.Right_Ready = False
         self.Left_Ready = False
         if(Local_Left_spot is not None):
-            self.Left_spot = Local_Left_spot
+            self.Left_spot = Local_Left_spot.copy()
         if(Local_Right_spot is not None):
-            self.Right_spot = Local_Right_spot
+            self.Right_spot = Local_Right_spot.copy()
         
     def fuky_Cal_point(self):
         if self.Left_spot is not None and self.Right_spot is not None:
