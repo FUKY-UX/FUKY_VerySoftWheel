@@ -24,77 +24,30 @@ class FUKY_BleBase:
     
     def __init__(self,Close_Event):
         """初始化蓝牙设备信息，事件必须是跨进程事件，用于关闭进程""" 
-        
-        self.DEVICE_NAME = "FUKY_MOUSE"
-        self.SERVICE_UUID = "0000f233-0000-1000-8000-00805f9b34fb"
-        self.ACCESS_SERVICE_UUID = "00001800-0000-1000-8000-00805f9b34fb"
-        self.IMU_CHAR_UUID = "0000f666-0000-1000-8000-00805f9b34fb"
-        self.PRESS_CHAR_UUID = "0000f667-0000-1000-8000-00805f9b34fb"
-        self.BTN_CHAR_UUID = "0000f668-0000-1000-8000-00805f9b34fb"
-        self.HID_SERVICE_UUID = "00001812-0000-1000-8000-00805f9b34fb"
-        #转换浮点数的参数
-        self.SCALE_Q14 = 1.0 / (1 << 14)
-        self.SCALE_Q8 = 1.0 / (1 << 8)
-        
         # 进程共享变量
         self.Is_device_found = multiprocessing.Value(ctypes.c_bool, False)
-        self.ble_process = None
         self.close_event = Close_Event
-        # 连接共享内存对象，需要在主进程中创建
+        self.ble_process =None
+    def start_ble_process(self):
+        """启动蓝牙处理进程"""
+        self.ble_process = multiprocessing.Process(target=self.ble_process_Active,args=(self.Is_device_found, self.close_event))
+        self.ble_process.start()
         
-        self.IMU_Mem_name = "IMU_Memory"
-        self.MemSize = 32
-        self.IMU_Mem = None 
-        try:
-            self.IMU_Mem = mmap.mmap(
-                -1,
-                self.MemSize,
-                tagname=self.IMU_Mem_name,
-                access=mmap.ACCESS_WRITE
-            )
-            print("成功连接共享内存")
-        except Exception as e:
-            print(f"共享内存连接失败: {e},读取到的数据将不会传入应用")
-            self.IMU_Mem = None
-        # 按钮共享内存配置
-        self.BTN_Mem_name = "BTN_Memory"
-        self.BTN_MemSize = 1  # 只需要1字节存储按钮状态
-        self.BTN_Mem = None
-        try:
-            self.BTN_Mem = mmap.mmap(
-                -1,
-                self.BTN_MemSize,
-                tagname=self.BTN_Mem_name,
-                access=mmap.ACCESS_WRITE
-            )
-            print("成功连接按钮共享内存")
-        except Exception as e:
-            print(f"按钮共享内存连接失败: {e}")
-        # 按钮共享内存配置
-        self.PRESS_Mem_name = "BTN_Memory"
-        self.PRESS_MemSize = 2  # 只需要2字节存储压力
-        self.PRESS_Mem = None
-        try:
-            self.PRESS_Mem = mmap.mmap(
-                -1,
-                self.PRESS_MemSize,
-                tagname=self.PRESS_Mem_name,
-                access=mmap.ACCESS_WRITE
-            )
-            print("创建了压力共享内存")
-        except Exception as e:
-            print(f"按钮共享内存连接失败: {e}")
-        # 创建Window事件对象
-        self.BleWindowEventHandler = fuky_WinAPI_base.FUKY_WindowAPIHandler();
-        self.imu_event = self.BleWindowEventHandler.Creat_WinEvent("IMU_DataRev",DontAutoReset=False,OriginSet=False)
-        self.btn_event = self.BleWindowEventHandler.Creat_WinEvent("Btn_DataRev",DontAutoReset=False,OriginSet=False)
-        self.press_event = self.BleWindowEventHandler.Creat_WinEvent("Press_DataRev",DontAutoReset=False,OriginSet=False)
+        print("蓝牙处理进程已启动")
+        return self.ble_process
 
-    def ble_process_Active(self):
+    def stop_ble_process(self):
+        """停止蓝牙处理进程"""
+        if self.ble_process and self.ble_process.is_alive():
+            self.close_event.set()
+            self.ble_process.join(timeout=5)
+            print("蓝牙进程已停止")
+
+    def ble_process_Active(self, is_device_found, close_event):
         # 运行异步主函数
         if sys.platform == "win32":
             try:
-                asyncio.run(self.ble_process_function(self.Is_device_found))
+                asyncio.run(self.ble_process_function(is_device_found,close_event))
             except Exception as e:
                 print(f"发生未预期错误: {str(e)}")
             finally:
@@ -108,8 +61,72 @@ class FUKY_BleBase:
        
 
         
-    async def ble_process_function(self, Is_device_found):
+    async def ble_process_function(self, Is_device_found,Close_Event):
         print("BLE设备处理进程已启动")
+        DEVICE_NAME = "FUKY_MOUSE"
+        SERVICE_UUID = "0000f233-0000-1000-8000-00805f9b34fb"
+        IMU_CHAR_UUID = "0000f666-0000-1000-8000-00805f9b34fb"
+        PRESS_CHAR_UUID = "0000f667-0000-1000-8000-00805f9b34fb"
+        BTN_CHAR_UUID = "0000f668-0000-1000-8000-00805f9b34fb"
+
+        #转换浮点数的参数
+        SCALE_Q14 = 1.0 / (1 << 14)
+        SCALE_Q8 = 1.0 / (1 << 8)
+        
+
+        Local_close_event = Close_Event
+        # 连接共享内存对象，需要在主进程中创建
+        
+        IMU_Mem_name = "IMU_Memory"
+        MemSize = 32
+        IMU_Mem = None 
+        try:
+            IMU_Mem = mmap.mmap(
+                -1,
+                MemSize,
+                tagname=IMU_Mem_name,
+                access=mmap.ACCESS_WRITE
+            )
+            print("成功连接共享内存")
+        except Exception as e:
+            print(f"共享内存连接失败: {e},读取到的数据将不会传入应用")
+            IMU_Mem = None
+        # 按钮共享内存配置
+        BTN_Mem_name = "BTN_Memory"
+        BTN_MemSize = 1  # 只需要1字节存储按钮状态
+        BTN_Mem = None
+        try:
+            BTN_Mem = mmap.mmap(
+                -1,
+                BTN_MemSize,
+                tagname=BTN_Mem_name,
+                access=mmap.ACCESS_WRITE
+            )
+            print("成功连接按钮共享内存")
+        except Exception as e:
+            print(f"按钮共享内存连接失败: {e}")
+        # 按钮共享内存配置
+        PRESS_Mem_name = "PRESS_Memory"
+        PRESS_MemSize = 2  # 只需要2字节存储压力
+        PRESS_Mem = None
+        try:
+            PRESS_Mem = mmap.mmap(
+                -1,
+                PRESS_MemSize,
+                tagname=PRESS_Mem_name,
+                access=mmap.ACCESS_WRITE
+            )
+            print("创建了压力共享内存")
+        except Exception as e:
+            print(f"按钮共享内存连接失败: {e}")
+        # 创建Window事件对象
+        BleWindowEventHandler = fuky_WinAPI_base.FUKY_WindowAPIHandler();
+        imu_event = BleWindowEventHandler.Creat_WinEvent("IMU_DataRev",DontAutoReset=False,OriginSet=False)
+        btn_event = BleWindowEventHandler.Creat_WinEvent("Btn_DataRev",DontAutoReset=False,OriginSet=False)
+        press_event = BleWindowEventHandler.Creat_WinEvent("Press_DataRev",DontAutoReset=False,OriginSet=False)
+
+        
+        
         # 蓝牙适配器
         adapter = None
         selector = BluetoothLEDevice.get_device_selector_from_connection_status(BluetoothConnectionStatus.CONNECTED)
@@ -132,7 +149,7 @@ class FUKY_BleBase:
         btn_event_token = None
         press_event_token = None
         
-        while(not self.close_event.is_set()):
+        while(not Local_close_event.is_set()):
             # ======尝试获得蓝牙适配器======
             if(adapter == None):
                 for count in range(10):
@@ -172,8 +189,8 @@ class FUKY_BleBase:
                     # 获取设备名称
                     device_name_found = device_info.name or "未知设备"
                     # 检查是否是我们要找的设备
-                    if device_name_found == self.DEVICE_NAME:
-                        print(f"找到目标设备: {self.DEVICE_NAME}")
+                    if device_name_found == DEVICE_NAME:
+                        print(f"找到目标设备: {DEVICE_NAME}")
                         FUKY_Device_info = device_info
                         # 打印基本设备信息
                         print(f"名称: {FUKY_Device_info.name}")
@@ -198,20 +215,20 @@ class FUKY_BleBase:
                 if services_result.status == 0:  # 成功
                     print(f"GATT服务数量: {services_result.services.size}")
                     for service in services_result.services:
-                        if str(service.uuid).lower() == self.SERVICE_UUID.lower():
+                        if str(service.uuid).lower() == SERVICE_UUID.lower():
                             target_service = service
                             print(f"找到目标服务: {service.uuid}")
                             # 获取目标特征值
                             characteristics_result = await target_service.get_characteristics_async()
                             if characteristics_result.status == 0:
                                 for characteristic in characteristics_result.characteristics:
-                                    if str(characteristic.uuid).lower() == self.IMU_CHAR_UUID.lower():
+                                    if str(characteristic.uuid).lower() == IMU_CHAR_UUID.lower():
                                         imu_char = characteristic
                                         print(f"找到目标特征值: {characteristic.uuid}")
-                                    elif str(characteristic.uuid).lower() == self.BTN_CHAR_UUID.lower():
+                                    elif str(characteristic.uuid).lower() == BTN_CHAR_UUID.lower():
                                         btn_char = characteristic
                                         print(f"找到目标特征值: {characteristic.uuid}")
-                                    elif str(characteristic.uuid).lower() == self.PRESS_CHAR_UUID.lower():
+                                    elif str(characteristic.uuid).lower() == PRESS_CHAR_UUID.lower():
                                         press_char = characteristic
                                         print(f"找到目标特征值: {characteristic.uuid}")
                             else:
@@ -249,25 +266,20 @@ class FUKY_BleBase:
                                             quat = struct.unpack('<4h', data[6:14])
                                             
                                             # 转换为浮点数
-                                            accel_float = tuple(v * self.SCALE_Q8 for v in lin_accel)
-                                            quat_float = tuple(v * self.SCALE_Q14 for v in quat)
+                                            accel_float = tuple(v * SCALE_Q8 for v in lin_accel)
+                                            quat_float = tuple(v * SCALE_Q14 for v in quat)
                                             
-                                            # 创建IMU数据字典
-                                            imu_data = {
-                                                'accel': accel_float,
-                                                'quat': quat_float,
-                                                'raw_data': data.hex()
-                                            }
+
                                             
                                             # 打印解析后的数据
-                                            print(f"收到IMU数据:")
+                                            # print("收到IMU数据:")
                                             #print(f"  原始数据: {data.hex()}")
                                             #print(f"  加速度 (g): {accel_float}")
                                             #print(f"  四元数: {quat_float}")
                                             
                                             
                                             # 将数据写入共享内存
-                                            if self.IMU_Mem is not None:
+                                            if IMU_Mem is not None:
                                                 try:
                                             # 打包数据为二进制格式 (7个float: 3个加速度 + 4个四元数)
                                                     packed_data = struct.pack(
@@ -276,12 +288,12 @@ class FUKY_BleBase:
                                                         quat_float[0], quat_float[1], quat_float[2], quat_float[3]
                                                     )
                                                     # 直接写入共享内存
-                                                    self.IMU_Mem.seek(0)
-                                                    self.IMU_Mem.write(packed_data)
-                                                    self.IMU_Mem.flush()
-                                                    print("已将IMU数据写入共享内存")
+                                                    IMU_Mem.seek(0)
+                                                    IMU_Mem.write(packed_data)
+                                                    IMU_Mem.flush()
+                                                    #print("已将IMU数据写入共享内存")
                                                     # 触发事件
-                                                    self.BleWindowEventHandler.set_event(self.imu_event)
+                                                    BleWindowEventHandler.set_event(imu_event)
                                                 except Exception as e:
                                                     print(f"写入共享内存失败: {e}")
                                             
@@ -310,28 +322,28 @@ class FUKY_BleBase:
                                         button_state = data_byte
                                         
                                         # 按位解析按钮状态
-                                        left_pressed = bool(button_state & 0x01)    # 第0位：左键
-                                        right_pressed = bool(button_state & 0x02)   # 第1位：右键
-                                        middle_pressed = bool(button_state & 0x04)  # 第2位：中键
+                                        # left_pressed = bool(button_state & 0x01)    # 第0位：左键
+                                        # right_pressed = bool(button_state & 0x02)   # 第1位：右键
+                                        # middle_pressed = bool(button_state & 0x04)  # 第2位：中键
                                         
                                         # 打印按钮状态
-                                        print("\n按钮状态更新：")
+                                        # print("\n按钮状态更新：")
                                         # print(f"  左键: {'按下' if left_pressed else '释放'}")
                                         # print(f"  右键: {'按下' if right_pressed else '释放'}")
                                         # print(f"  中键: {'按下' if middle_pressed else '释放'}")
                                         
                                         # 写入共享内存（单个字节）
-                                        if self.BTN_Mem is not None:
+                                        if BTN_Mem is not None:
                                             try:
-                                                self.BTN_Mem.seek(0)
-                                                self.BTN_Mem.write_byte(button_state)
-                                                self.BTN_Mem.flush()
-                                                print("按钮状态已写入共享内存")
+                                                BTN_Mem.seek(0)
+                                                BTN_Mem.write_byte(button_state)
+                                                BTN_Mem.flush()
+                                                #print("按钮状态已写入共享内存")
                                             except Exception as e:
                                                 print(f"写入按钮共享内存失败: {e}")
                                         
                                         # 触发事件
-                                        self.BleWindowEventHandler.set_event(self.btn_event)
+                                        BleWindowEventHandler.set_event(btn_event)
                                         
                                     else:
                                         err_msg = f"无效按钮数据长度: {buffer.length if buffer else 'None'}"
@@ -355,19 +367,19 @@ class FUKY_BleBase:
                                         #print(f"  压力百分比: {pressure_value} (0x{pressure_value:04X})")
                                         
                                         # 写入共享内存（两个字节）
-                                        if self.PRESS_Mem is not None:
+                                        if PRESS_Mem is not None:
                                             try:
-                                                self.PRESS_Mem.seek(0)
+                                                PRESS_Mem.seek(0)
                                                 # 将16位值拆分为两个字节写入
-                                                self.PRESS_Mem.write_byte(pressure_value & 0xFF)         # 低字节
-                                                self.PRESS_Mem.write_byte((pressure_value >> 8) & 0xFF) # 高字节
-                                                self.PRESS_Mem.flush()
+                                                PRESS_Mem.write_byte(pressure_value & 0xFF)         # 低字节
+                                                PRESS_Mem.write_byte((pressure_value >> 8) & 0xFF) # 高字节
+                                                PRESS_Mem.flush()
                                                 #print("压力值已写入共享内存")
                                             except Exception as e:
                                                 print(f"写入压力共享内存失败: {e}")
                                         
                                         # 触发压力更新事件
-                                        self.BleWindowEventHandler.set_event(self.press_event)
+                                        BleWindowEventHandler.set_event(press_event)
                                     else:
                                         err_msg = f"无效压力数据长度: {buffer.length if buffer else 'None'}"
                                         print(err_msg)
@@ -393,17 +405,21 @@ class FUKY_BleBase:
                             pre_config_result = await press_char.write_client_characteristic_configuration_descriptor_async(
                                 GattClientCharacteristicConfigurationDescriptorValue.NOTIFY
                             )
-                            if btn_config_result == 0:  # 成功
+                            if pre_config_result == 0:  # 成功
                                 print("成功订阅压力特征值通知")
                         else:                      
                             print("{service.uuid}不是fx233服务,继续查找")
+                        
                 else:                      
                     print("获取GATT服务时出错,重新尝试")
                     # ********重置进度**********
                     FUKY_Device = None
                     FUKY_Device_info = None
                     break # 清空进度,重新获取     
-                    
+                if FUKY_Device and not Is_device_found.value:
+                    with Is_device_found.get_lock():
+                        Is_device_found.value = True
+                    print("设备已标记为找到状态")
                 break    
         
         print("工作完毕，释放所有蓝牙资源")
@@ -446,14 +462,23 @@ class FUKY_BleBase:
 
                     
 # 测试代码
+# 主进程
 if __name__ == "__main__":
-    # 创建一个关闭事件对象
     close_event = multiprocessing.Event()
+    ble_controller = FUKY_BleBase(close_event)
     
-    # 实例化BLE基类
-    ble_base = FUKY_BleBase(close_event)
-    
-    # 测试蓝牙适配器获取
-    print("\n正在测试蓝牙适配器获取...")
-    ble_base.ble_process_Active()
+    try:
+        # 启动蓝牙进程
+        ble_controller.start_ble_process()
         
+        # 主循环监控状态
+        while True:
+            if ble_controller.Is_device_found.value:
+                print("设备已连接")
+            else:
+                print("等待设备连接...")
+            time.sleep(1)
+            
+    except KeyboardInterrupt:
+        # 停止蓝牙进程
+        ble_controller.stop_ble_process()        

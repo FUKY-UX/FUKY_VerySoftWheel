@@ -38,15 +38,12 @@ class FUKYWindow(QMainWindow):
 
         # 蓝牙处理的进程，利用多核CPU，提高效率，避免高频的IMU数据与低频的图像数据相互影响
 
-        # self.BleFukyDataHandler = FUKY_BleDeviceBase()
-        # self.BleFukyDataHandler.start_ble_process()        # 启动BLE设备处理进程
+        
         # 创建一个关闭事件对象
         self.close_event = multiprocessing.Event()
         
         # 实例化BLE基类
         self.ble_base = FUKY_BleBase(self.close_event)
-        self.ble_base.start_ble_process()  # 替换原来的 ble_process_Active()
-
 
 
 
@@ -344,7 +341,7 @@ def main():
     window.show()
     # 初始化数据处理线程
     window.ImgDataHandler_Thread.start()
-    window.ble_base.ble_process_Active()
+    window.ble_base.start_ble_process()
     sys.exit(app.exec_())
 
 if __name__ == "__main__":
