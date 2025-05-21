@@ -189,7 +189,7 @@ class FUKY_DataHandler():
             calibrated_l,calibrated_r = self.rectify_points(self.Left_spot,self.Right_spot)
             self.triangulate(calibrated_l,calibrated_r)
 
-    def detect_spot_centroids(self, binary_img, min_area=15,max_area=500):
+    def detect_spot_centroids(self, binary_img, min_area=15,max_area=600):
         num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(
             binary_img.astype(np.uint8), 
             connectivity=4
