@@ -6,8 +6,10 @@
 # 支进程 FUKY_BleDeviceBase(处理蓝牙的IMU数据，避免处理图像造成的延迟)
 # 支进程 FUKY_PipeServer(命名管道，向应用层提供数据时使用，相对独立) 
 #
+import multiprocessing
 from fuky_data_Processing import FUKY_DataHandler
-from fuky_device_BleData import FUKY_BleDeviceBase
+# from fuky_device_BleData import FUKY_BleDeviceBase
+from fuky_ble_base import FUKY_BleBase
 import threading
 import cv2
 import mmap
@@ -28,7 +30,7 @@ class FUKYWindow(QMainWindow):
         super().__init__()
         self.initUI()
         self.initTray()
-        self.initShareMem()
+        #self.initShareMem() #共享内存让各自进程线程自己创建即可
         # 图像处理线程，我暂时还没有利用更多的进程来处理，所以图像处理和UI更新都是在一个进程中更新
         # 这样效率相对低一些，但是算是历史遗留问题
         self.ImgDataHandler = FUKY_DataHandler()
@@ -36,8 +38,16 @@ class FUKYWindow(QMainWindow):
 
         # 蓝牙处理的进程，利用多核CPU，提高效率，避免高频的IMU数据与低频的图像数据相互影响
 
-        self.BleFukyDataHandler = FUKY_BleDeviceBase()
-        self.BleFukyDataHandler.start_ble_process()        # 启动BLE设备处理进程
+        # self.BleFukyDataHandler = FUKY_BleDeviceBase()
+        # self.BleFukyDataHandler.start_ble_process()        # 启动BLE设备处理进程
+        # 创建一个关闭事件对象
+        self.close_event = multiprocessing.Event()
+        
+        # 实例化BLE基类
+        self.ble_base = FUKY_BleBase(self.close_event)
+        self.ble_base.start_ble_process()  # 替换原来的 ble_process_Active()
+
+
 
 
 # ---------- 初始化 ----------
@@ -213,10 +223,14 @@ class FUKYWindow(QMainWindow):
                         print("警告：图像处理线程未能正常终止")
                 # ==========关闭蓝牙进程==========  
                 # 终止蓝牙进程（如果启用）
-                if hasattr(self.BleFukyDataHandler, 'is_alive'):
-                    if self.BleFukyDataHandler.is_alive():
-                        self.BleFukyDataHandler.terminate()
-                        self.BleFukyDataHandler.join(timeout=6)
+                #self.close_event.set()
+                if self.ble_base.ble_process and self.ble_base.ble_process.is_alive():
+                    self.ble_base.ble_process.terminate()
+                    self.ble_base.ble_process.join()
+                # if hasattr(self.BleFukyDataHandler, 'is_alive'):
+                #     if self.BleFukyDataHandler.is_alive():
+                #         self.BleFukyDataHandler.terminate()
+                #         self.BleFukyDataHandler.join(timeout=6)
                 # ==========销毁系统托盘==========  
                 self.tray_icon.hide()
                 self.tray_icon.deleteLater()  # 延迟删除对象
@@ -330,6 +344,7 @@ def main():
     window.show()
     # 初始化数据处理线程
     window.ImgDataHandler_Thread.start()
+    window.ble_base.ble_process_Active()
     sys.exit(app.exec_())
 
 if __name__ == "__main__":

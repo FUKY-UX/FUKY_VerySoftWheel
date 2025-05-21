@@ -261,9 +261,9 @@ class FUKY_BleBase:
                                             
                                             # 打印解析后的数据
                                             print(f"收到IMU数据:")
-                                            print(f"  原始数据: {data.hex()}")
-                                            print(f"  加速度 (g): {accel_float}")
-                                            print(f"  四元数: {quat_float}")
+                                            #print(f"  原始数据: {data.hex()}")
+                                            #print(f"  加速度 (g): {accel_float}")
+                                            #print(f"  四元数: {quat_float}")
                                             
                                             
                                             # 将数据写入共享内存
@@ -316,9 +316,9 @@ class FUKY_BleBase:
                                         
                                         # 打印按钮状态
                                         print("\n按钮状态更新：")
-                                        print(f"  左键: {'按下' if left_pressed else '释放'}")
-                                        print(f"  右键: {'按下' if right_pressed else '释放'}")
-                                        print(f"  中键: {'按下' if middle_pressed else '释放'}")
+                                        # print(f"  左键: {'按下' if left_pressed else '释放'}")
+                                        # print(f"  右键: {'按下' if right_pressed else '释放'}")
+                                        # print(f"  中键: {'按下' if middle_pressed else '释放'}")
                                         
                                         # 写入共享内存（单个字节）
                                         if self.BTN_Mem is not None:
@@ -352,7 +352,7 @@ class FUKY_BleBase:
                                         pressure_value = reader.read_uint16()
                                         
                                         # 打印压力百分比值
-                                        print(f"  压力百分比: {pressure_value} (0x{pressure_value:04X})")
+                                        #print(f"  压力百分比: {pressure_value} (0x{pressure_value:04X})")
                                         
                                         # 写入共享内存（两个字节）
                                         if self.PRESS_Mem is not None:
@@ -362,7 +362,7 @@ class FUKY_BleBase:
                                                 self.PRESS_Mem.write_byte(pressure_value & 0xFF)         # 低字节
                                                 self.PRESS_Mem.write_byte((pressure_value >> 8) & 0xFF) # 高字节
                                                 self.PRESS_Mem.flush()
-                                                print("压力值已写入共享内存")
+                                                #print("压力值已写入共享内存")
                                             except Exception as e:
                                                 print(f"写入压力共享内存失败: {e}")
                                         
@@ -385,7 +385,7 @@ class FUKY_BleBase:
                             )
                             if imu_config_result == 0:  # 成功
                                 print("成功订阅IMU征值通知")
-                            btn_config_result = await imu_char.write_client_characteristic_configuration_descriptor_async(
+                            btn_config_result = await btn_char.write_client_characteristic_configuration_descriptor_async(
                                 GattClientCharacteristicConfigurationDescriptorValue.NOTIFY
                             )
                             if btn_config_result == 0:  # 成功
@@ -405,7 +405,6 @@ class FUKY_BleBase:
                     break # 清空进度,重新获取     
                     
                 break    
-            break
         
         print("工作完毕，释放所有蓝牙资源")
         if imu_event_token is not None:
