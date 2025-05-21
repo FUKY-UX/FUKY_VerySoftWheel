@@ -26,8 +26,7 @@ class FUKY_DataHandler():
         self.right_frame2 = None
         self.Process_img1 = None       #调试用图像，调试输出
         self.Process_img2 = None
-        self.alpha =10  # 对比度控制（>1增加对比度）
-        self.beta = 5    # 曝光度控制（>0增加亮度）
+
         self.threshold_value = 127        # 二分阈值
         # 计算坐标用的参数
         stereo_params_path = "./stereo_params_game.npz"
@@ -135,7 +134,8 @@ class FUKY_DataHandler():
     def fuky_processing1(self,gray_imgdata):
         """调整图像的对比度和曝光度，减去上一帧图像，留下运动中的光斑，参数暂时硬编码到了代码中"""
         # 1. 调整对比度和曝光度
-        adjusted_gray_img = cv2.convertScaleAbs(gray_imgdata, alpha=self.alpha, beta=self.beta)
+        adjusted_gray_img = cv2.convertScaleAbs(gray_imgdata, 1, 8)
+
         # 2. 模糊，去掉莫名其妙的高频噪声 
         blurred_diff = cv2.blur(adjusted_gray_img, (5,5))  
         # 3. 二值化
@@ -144,12 +144,13 @@ class FUKY_DataHandler():
         if self.prev_frame1 is None:
             return binary_img1
         frame_diff1 = cv2.absdiff(binary_img1, self.prev_frame1)# 现在这个帧不再是上一帧，而是摄像头没捕捉到红点的前一帧画面
-        return frame_diff1
+        return binary_img1
 
     def fuky_processing2(self,gray_imgdata):
         """调整图像的对比度和曝光度，减去上一帧图像，留下运动中的光斑,参数暂时硬编码到了代码中"""
         # 1. 调整对比度和曝光度
-        adjusted_gray_img = cv2.convertScaleAbs(gray_imgdata, alpha=self.alpha, beta=self.beta)
+        adjusted_gray_img = cv2.convertScaleAbs(gray_imgdata, 1, 8)
+
         # 2. 模糊，去掉莫名其妙的高频噪声 （均值滤波）
         blurred_diff = cv2.blur(adjusted_gray_img, (5,5))  
         # 3. 二值化
@@ -158,7 +159,7 @@ class FUKY_DataHandler():
         if self.prev_frame2 is None:
             return binary_img2
         frame_diff2 = cv2.absdiff(binary_img2, self.prev_frame2)# 现在这个帧不再是上一帧，而是摄像头没捕捉到红点的前一帧画面
-        return frame_diff2
+        return binary_img2
         # ---------- 算法部分(全是opencv的功劳，不要看我) ----------
 
     def fuky_detect_point(self):
@@ -176,7 +177,7 @@ class FUKY_DataHandler():
             calibrated_l,calibrated_r = self.rectify_points(self.Left_spot,self.Right_spot)
             self.triangulate(calibrated_l,calibrated_r)
 
-    def detect_spot_centroids(self, binary_img, min_area=6):
+    def detect_spot_centroids(self, binary_img, min_area=25):
         num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(
             binary_img.astype(np.uint8), 
             connectivity=4
@@ -196,7 +197,7 @@ class FUKY_DataHandler():
                 cv2.circle(result_img, 
                           (int(round(x)), int(round(y))), 
                           radius=3, color=(0, 0, 255), thickness=-1)
-                
+                print(f"检测到连通域面积为{areas[max_idx-1]}")
                 return result_img, max_centroid, True  # 返回数组
         
         return result_img, None, False
@@ -245,7 +246,7 @@ class FUKY_DataHandler():
                 self.Locator_Mem.seek(0)
                 self.Locator_Mem.write(packed_data)
                 self.Locator_Mem.flush()
-                print("已将IMU数据写入共享内存")
+                #print("已将3D数据写入共享内存")
             except Exception as e:
                 print(f"写入共享内存失败: {e}")
         
