@@ -26,6 +26,9 @@ class FUKY_DataHandler():
         self.right_frame2 = None
         self.Process_img1 = None       #调试用图像，调试输出
         self.Process_img2 = None
+        
+        self.Bin_img1 = None       #二值化后的图像
+        self.Bin_img2 = None
 
         self.threshold_value = 127        # 二分阈值
         # 计算坐标用的参数
@@ -140,11 +143,12 @@ class FUKY_DataHandler():
         blurred_diff = cv2.blur(adjusted_gray_img, (5,5))  
         # 3. 二值化
         _, binary_img1 = cv2.threshold(blurred_diff, self.threshold_value, 255, cv2.THRESH_BINARY)
+        self.Bin_img1 = binary_img1.copy()
         # 4. 帧差
         if self.prev_frame1 is None:
             return binary_img1
-        frame_diff1 = cv2.absdiff(binary_img1, self.prev_frame1)# 现在这个帧不再是上一帧，而是摄像头没捕捉到红点的前一帧画面
-        return binary_img1
+        frame_diff1 = cv2.subtract(binary_img1,self.prev_frame1)# 现在这个帧不再是上一帧，而是摄像头没捕捉到红点的前一帧画面
+        return frame_diff1
 
     def fuky_processing2(self,gray_imgdata):
         """调整图像的对比度和曝光度，减去上一帧图像，留下运动中的光斑,参数暂时硬编码到了代码中"""
@@ -155,20 +159,24 @@ class FUKY_DataHandler():
         blurred_diff = cv2.blur(adjusted_gray_img, (5,5))  
         # 3. 二值化
         _, binary_img2 = cv2.threshold(blurred_diff, self.threshold_value, 255, cv2.THRESH_BINARY)
+        self.Bin_img2 = binary_img2.copy()
         # 4. 帧差
         if self.prev_frame2 is None:
             return binary_img2
-        frame_diff2 = cv2.absdiff(binary_img2, self.prev_frame2)# 现在这个帧不再是上一帧，而是摄像头没捕捉到红点的前一帧画面
-        return binary_img2
+        # 对前一帧进行膨胀处理
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3,3))
+        dilated_prev = cv2.dilate(self.prev_frame2, kernel, iterations=1)
+        frame_diff2 = cv2.subtract(binary_img2,dilated_prev)# 现在这个帧不再是上一帧，而是摄像头没捕捉到红点的前一帧画面
+        return frame_diff2
         # ---------- 算法部分(全是opencv的功劳，不要看我) ----------
 
     def fuky_detect_point(self):
         self.Process_img1,self.Left_spot ,IsDetected1 = self.detect_spot_centroids(self.left_frame1)
         if(not IsDetected1):
-            self.prev_frame1 = self.left_frame1
+            self.prev_frame1 = self.Bin_img1
         self.Process_img2,self.Right_spot ,IsDetected2 = self.detect_spot_centroids(self.right_frame2)
         if(not IsDetected2):
-            self.prev_frame2 = self.right_frame2
+            self.prev_frame2 = self.Bin_img2
         self.Right_Ready = False
         self.Left_Ready = False
         
@@ -177,7 +185,7 @@ class FUKY_DataHandler():
             calibrated_l,calibrated_r = self.rectify_points(self.Left_spot,self.Right_spot)
             self.triangulate(calibrated_l,calibrated_r)
 
-    def detect_spot_centroids(self, binary_img, min_area=25):
+    def detect_spot_centroids(self, binary_img, min_area=25,max_area=300):
         num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(
             binary_img.astype(np.uint8), 
             connectivity=4
@@ -186,20 +194,26 @@ class FUKY_DataHandler():
         result_img = cv2.cvtColor(binary_img, cv2.COLOR_GRAY2BGR)
         
         if num_labels > 1:
+            # 提取所有连通域信息（排除背景）
             areas = stats[1:, cv2.CC_STAT_AREA]
-            max_idx = np.argmax(areas) + 1
+            valid_indices = np.where((areas >= min_area) & (areas <= max_area))[0]
             
-            if areas[max_idx-1] >= min_area:
-                # 返回 NumPy 数组而非元组
-                max_centroid = centroids[max_idx].astype(np.float32)  # 移除 tuple() 转换
+            
+            if valid_indices.size > 0:
+                # 获取符合条件的最大连通域
+                max_area_idx = np.argmax(areas[valid_indices])
+                selected_idx = valid_indices[max_area_idx] + 1  # 补偿背景索引偏移
+                
+                # 提取坐标信息
+                max_centroid = centroids[selected_idx].astype(np.float32)
                 x, y = max_centroid
                 
+                # 绘制标记
                 cv2.circle(result_img, 
                           (int(round(x)), int(round(y))), 
                           radius=3, color=(0, 0, 255), thickness=-1)
-                print(f"检测到连通域面积为{areas[max_idx-1]}")
-                return result_img, max_centroid, True  # 返回数组
-        
+                print(f"发现有效连通域，面积：{areas[valid_indices[max_area_idx]]}")
+                return result_img, max_centroid, True        
         return result_img, None, False
             
     
